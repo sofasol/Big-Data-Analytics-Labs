@@ -85,3 +85,80 @@
 7. Код Apache Spark трансформации данных из снежинки/звезды в отчеты в Neo4j.
 8. Код Apache Spark трансформации данных из снежинки/звезды в отчеты в MongoDB.
 9. Код Apache Spark трансформации данных из снежинки/звезды в отчеты в Valkey.
+
+
+# Инструкция для запуска проекта
+
+## 1. Запуск и проверка загрузки данных в PostgreSQL
+
+```bash
+docker-compose up -d
+```
+
+Данные загружаются автоматически при старте контейнера из 10 CSV-файлов.
+
+```bash
+docker exec -it postgres_lab2 psql -U postgres -d lab_db -c "SELECT COUNT(*) FROM mock_data;"
+```
+Ожидаемый результат: 10000
+
+## 2. Построение схемы звезда
+Скрипт `transform_star.py` читает mock_data из PostgreSQL и строит таблицы измерений и фактов.
+
+```bash
+docker exec -it jupyter_lab2 spark-submit \
+  --master spark://spark-master:7077 \
+  --jars /opt/spark/drivers/postgresql-42.7.1.jar \
+  /home/jovyan/work/transform_star.py
+```
+Ожидаемый результат: в PostgreSQL появятся таблицы `dim_customer`, `dim_seller`, `dim_product`, `dim_store`, `dim_supplier`, `fact_sales`.
+
+## 3. Создание отчётов в ClickHouse
+Скрипт `create_reports.py` читает схему звезда и формирует 6 аналитических витрин.
+
+```bash
+docker exec -it jupyter_lab2 spark-submit \
+  --master spark://spark-master:7077 \
+  --jars /opt/spark/drivers/postgresql-42.7.1.jar \
+  /home/jovyan/work/create_reports.py
+```
+## 4. Просмотр отчётов
+Отчёт 1. Продажи по продуктам (топ-10)
+```bash
+docker exec -it clickhouse_lab2 clickhouse-client --user user --password password --query "SELECT product_name, product_category, total_qty, revenue, avg_price FROM reports.report_product_sales ORDER BY total_qty DESC LIMIT 10 FORMAT Pretty;"
+```
+Отчёт 2. Продажи по клиентам (топ-10)
+```bash
+docker exec -it clickhouse_lab2 clickhouse-client --user user --password password --query "SELECT first_name, last_name, email, country, total_spent, avg_check FROM reports.report_customer_sales ORDER BY total_spent DESC LIMIT 10 FORMAT Pretty;"
+```
+Отчёт 3. Продажи по времени (помесячно)
+```bash
+docker exec -it clickhouse_lab2 clickhouse-client --user user --password password --query "SELECT year, month, revenue, order_count, avg_order_value FROM reports.report_time_sales ORDER BY year, month FORMAT Pretty;"
+```
+Отчёт 4. Продажи по магазинам (топ-5)
+```bash
+docker exec -it clickhouse_lab2 clickhouse-client --user user --password password --query "SELECT store_name, city, country, revenue, avg_check FROM reports.report_store_sales ORDER BY revenue DESC LIMIT 5 FORMAT Pretty;"
+```
+Отчёт 5. Продажи по поставщикам (топ-5)
+```bash
+docker exec -it clickhouse_lab2 clickhouse-client --user user --password password --query "SELECT supplier_name, country, revenue, avg_price FROM reports.report_supplier_sales ORDER BY revenue DESC LIMIT 5 FORMAT Pretty;"
+```
+Отчёт 6. Качество продуктов (по рейтингу)
+```bash
+docker exec -it clickhouse_lab2 clickhouse-client --user user --password password --query "SELECT product_name, category, avg_rating, total_reviews FROM reports.report_product_quality ORDER BY avg_rating DESC FORMAT Pretty;"
+```
+## 5. Остановка и очистка
+```bash
+docker-compose down -v
+```
+**Используемые инструменты**
+
+PostgreSQL — реляционная база данных для хранения исходных данных и модели «звезда».
+
+ClickHouse — колоночная NoSQL база данных для хранения аналитических отчётов.
+
+Apache Spark — фреймворк для распределённой обработки данных, используется для ETL и расчёта витрин.
+
+Jupyter Notebook — среда для разработки и отладки PySpark-скриптов.
+
+Docker — платформа для контейнеризации всех сервисов проекта.
